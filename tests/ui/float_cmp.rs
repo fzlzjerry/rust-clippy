@@ -78,6 +78,18 @@ fn main() {
     x == 1.0;
     //~^ float_cmp
 
+    assert_eq!(x, 1.0);
+    //~^ float_cmp
+    assert_ne!(1.0, x);
+    //~^ float_cmp
+    debug_assert_eq!(x, 2.0);
+    //~^ float_cmp
+    debug_assert_ne!(2.0, x);
+    //~^ float_cmp
+
+    assert_eq!(x, 0.0); // no error, comparison with zero is ok
+    assert_ne!(f64::INFINITY, x); // no error, comparison with infinity is ok
+
     x != 0f64; // no error, comparison with zero is ok
 
     twice(x) != twice(ONE as f64);

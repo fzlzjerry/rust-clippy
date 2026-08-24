@@ -1,5 +1,5 @@
 use clippy_utils::consts::{ConstEvalCtxt, Constant};
-use clippy_utils::diagnostics::span_lint_and_then;
+use clippy_utils::diagnostics::{span_lint, span_lint_and_then};
 use clippy_utils::macros::{find_assert_eq_args, first_node_macro_backtrace, macro_backtrace};
 use clippy_utils::sugg::Sugg;
 use clippy_utils::{parent_item_name, sym};
@@ -21,26 +21,25 @@ pub(crate) fn check_assert<'tcx>(cx: &LateContext<'tcx>, e: &'tcx Expr<'_>) {
         let ecx = ConstEvalCtxt::new(cx);
         let ctxt = macro_call.span.ctxt();
 
-        let has_const = is_float_const(&ecx, lhs, ctxt) || is_float_const(&ecx, rhs, ctxt);
-        if !has_const {
+        let Some(lhs_is_local) = operand_locality(&ecx, lhs, ctxt) else {
             return;
-        }
-
-        let is_comparing_arrays = is_array(cx, lhs) || is_array(cx, rhs);
-        let msg = if is_comparing_arrays {
-            "strict comparison of `f32` or `f64` constant arrays"
-        } else {
-            "strict comparison of `f32` or `f64` constant"
+        };
+        let Some(rhs_is_local) = operand_locality(&ecx, rhs, ctxt) else {
+            return;
         };
 
-        clippy_utils::diagnostics::span_lint(cx, FLOAT_CMP_CONST, macro_call.span, msg);
+        let is_comparing_arrays = is_array(cx, lhs) || is_array(cx, rhs);
+        let (lint, msg) = get_lint_and_message(lhs_is_local && rhs_is_local, is_comparing_arrays);
+        span_lint(cx, lint, macro_call.span, msg);
     }
 }
 
-fn is_float_const(ecx: &ConstEvalCtxt<'_>, expr: &Expr<'_>, ctxt: SyntaxContext) -> bool {
+// `None` means that this operand is an allowed constant and the comparison should not lint.
+fn operand_locality(ecx: &ConstEvalCtxt<'_>, expr: &Expr<'_>, ctxt: SyntaxContext) -> Option<bool> {
     match ecx.eval_with_source(expr, ctxt) {
-        Some((c, s)) if !is_allowed(&c) => !s.is_local(),
-        _ => false,
+        Some((c, s)) if !is_allowed(&c) => Some(s.is_local()),
+        Some(_) => None,
+        None => Some(true),
     }
 }
 
@@ -71,15 +70,11 @@ pub(crate) fn check<'tcx>(
 
         let ecx = ConstEvalCtxt::new(cx);
         let ctxt = expr.span.ctxt();
-        let left_is_local = match ecx.eval_with_source(left, ctxt) {
-            Some((c, s)) if !is_allowed(&c) => s.is_local(),
-            Some(_) => return,
-            None => true,
+        let Some(left_is_local) = operand_locality(&ecx, left, ctxt) else {
+            return;
         };
-        let right_is_local = match ecx.eval_with_source(right, ctxt) {
-            Some((c, s)) if !is_allowed(&c) => s.is_local(),
-            Some(_) => return,
-            None => true,
+        let Some(right_is_local) = operand_locality(&ecx, right, ctxt) else {
+            return;
         };
 
         // Allow comparing the results of signum()
